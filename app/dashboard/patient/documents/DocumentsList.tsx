@@ -141,6 +141,26 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
     color: '#374151',
     marginBottom: '4px',
   }
+  const handleExtract = async (doc: Document) => {
+    if (doc.category !== 'lab') return
+
+    const res = await fetch('/api/extract-lab', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        documentId: doc.id,
+        storagePath: doc.storage_path,
+      }),
+    })
+
+    const data = await res.json()
+    if (!data.error) {
+      router.refresh()
+      alert(`✅ Extracción completada: ${data.exam_type}\n${data.summary}`)
+    } else {
+      alert('No se pudo extraer: ' + data.error)
+    }
+  }
 
   return (
     <div>
@@ -399,6 +419,26 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                   >
                     Eliminar
                   </button>
+                  {doc.category === 'lab' && !doc.ai_summary && (
+                    <button
+                      onClick={() => handleExtract(doc)}
+                      style={{
+                        padding: '6px 12px', borderRadius: '8px',
+                        border: '0.5px solid #bfdbfe', background: '#eff6ff',
+                        fontSize: '13px', cursor: 'pointer', color: '#2563eb',
+                      }}
+                    >
+                      🧪 Extraer
+                    </button>
+                  )}
+                  {doc.ai_summary && (
+                    <span style={{
+                      padding: '6px 10px', borderRadius: '8px',
+                      background: '#ecfdf5', fontSize: '12px', color: '#059669',
+                    }}>
+                      ✅ Extraído
+                    </span>
+                  )}
                 </div>
               </div>
             )

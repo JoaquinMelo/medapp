@@ -27,6 +27,12 @@ const cards = [
     desc: 'Gestionar quién ve tu historial',
     icon: '🔐', color: '#d97706',
   },
+  {
+  href: '/dashboard/patient/labs',
+  title: 'Mis laboratorios',
+  desc: 'Evolución de valores en el tiempo',
+  icon: '📈', color: '#059669',
+  },
 ]
 
 function Card({ href, title, desc, icon, color }: typeof cards[0]) {
