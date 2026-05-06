@@ -4,37 +4,7 @@ import { NextResponse } from 'next/server'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-export async function POST(request: Request) {
-  const supabase = await createServerSupabaseClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
-
-  const { documentId, storagePath } = await request.json()
-
-  // Descargar el archivo desde Supabase Storage
-  const { data: fileData, error: downloadError } = await supabase.storage
-    .from('medical-documents')
-    .download(storagePath)
-
-  if (downloadError || !fileData) {
-    return NextResponse.json({ error: 'No se pudo descargar el archivo' }, { status: 500 })
-  }
-
-  // Convertir a base64
-  const arrayBuffer = await fileData.arrayBuffer()
-  const base64 = Buffer.from(arrayBuffer).toString('base64')
-  const mimeType = storagePath.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Analiza este examen de laboratorio médico y extrae TODOS los valores que encuentres.
+const PROMPT = `Analiza este examen de laboratorio médico y extrae los valores más relevantes clínicamente (máximo 20).
 
 Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional ni backticks:
 {
@@ -43,51 +13,120 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
   "values": [
     {
       "name": "nombre del parámetro",
-      "value": número o null si no es numérico,
-      "unit": "unidad de medida o null",
-      "ref_min": número mínimo del rango normal o null,
-      "ref_max": número máximo del rango normal o null,
-      "is_text": true si el valor es texto (ej: Positivo/Negativo)
+      "value": 0,
+      "unit": "unidad o null",
+      "ref_min": 0,
+      "ref_max": 0,
+      "is_text": false
     }
   ]
 }
 
-Si no es un examen de laboratorio, responde: {"error": "No es un examen de laboratorio"}`,
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${mimeType};base64,${base64}`,
-                detail: 'high',
-              },
-            },
-          ],
+Si no es un examen de laboratorio, responde: {"error": "No es un examen de laboratorio"}`
+
+export async function POST(request: Request) {
+  const supabase = await createServerSupabaseClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+  const { documentId, storagePath } = await request.json()
+
+  const { data: fileData, error: downloadError } = await supabase.storage
+    .from('medical-documents')
+    .download(storagePath)
+
+  if (downloadError || !fileData) {
+    return NextResponse.json({ error: 'No se pudo descargar el archivo' }, { status: 500 })
+  }
+
+  const isPdf = storagePath.toLowerCase().endsWith('.pdf')
+  let contentForAI: OpenAI.Chat.ChatCompletionMessageParam
+
+  if (isPdf) {
+    try {
+      const arrayBuffer = await fileData.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      const { extractText } = await import('unpdf')
+      const { text } = await extractText(new Uint8Array(buffer), { mergePages: true })
+
+      if (!text || text.length < 20) {
+        return NextResponse.json({
+          error: 'El PDF no tiene texto legible. Intenta subir una imagen del examen.'
+        }, { status: 400 })
+      }
+
+      contentForAI = {
+        role: 'user',
+        content: `${PROMPT}\n\nTEXTO DEL EXAMEN:\n${text.slice(0, 6000)}`,
+      }
+    } catch (e) {
+      console.error('Error leyendo PDF:', e)
+      return NextResponse.json({
+        error: 'No se pudo leer el PDF. Intenta subir una imagen del examen.'
+      }, { status: 400 })
+    }
+  } else {
+    const arrayBuffer = await fileData.arrayBuffer()
+    const base64 = Buffer.from(arrayBuffer).toString('base64')
+    const ext = storagePath.split('.').pop()?.toLowerCase()
+    const mimeMap: Record<string, string> = {
+      jpg: 'image/jpeg', jpeg: 'image/jpeg',
+      png: 'image/png', webp: 'image/webp',
+    }
+    const mimeType = mimeMap[ext || ''] || 'image/jpeg'
+
+    contentForAI = {
+      role: 'user',
+      content: [
+        { type: 'text', text: PROMPT },
+        {
+          type: 'image_url',
+          image_url: {
+            url: `data:${mimeType};base64,${base64}`,
+            detail: 'high',
+          },
         },
       ],
-      max_tokens: 2000,
+    }
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [contentForAI],
+      max_tokens: 4000,
     })
 
-    const content = response.choices[0].message.content || ''
-    const clean = content.replace(/```json|```/g, '').trim()
-    const parsed = JSON.parse(clean)
+    const raw = response.choices[0].message.content || ''
+    const clean = raw.replace(/```json|```/g, '').trim()
+
+    let parsed
+    try {
+      parsed = JSON.parse(clean)
+    } catch {
+      const fixed = clean
+        .replace(/,\s*$/, '')
+        + (clean.includes('"values"') ? ']}' : '}')
+      parsed = JSON.parse(fixed)
+    }
 
     if (parsed.error) {
       return NextResponse.json({ error: parsed.error }, { status: 400 })
     }
 
-    // Guardar resumen en medical_documents
     await supabase
       .from('medical_documents')
       .update({ ai_summary: parsed.summary })
       .eq('id', documentId)
 
-    // Guardar valores individuales en lab_values
     if (parsed.values?.length > 0) {
       const labValues = parsed.values
-        .filter((v: { is_text?: boolean }) => !v.is_text)
+        .filter((v: { is_text?: boolean; value?: unknown }) =>
+          !v.is_text && v.value !== null && v.value !== undefined
+        )
         .map((v: {
           name: string
-          value: number | null
+          value: number
           unit: string | null
           ref_min: number | null
           ref_max: number | null
@@ -112,8 +151,9 @@ Si no es un examen de laboratorio, responde: {"error": "No es un examen de labor
       values: parsed.values,
     })
 
-  } catch (error) {
-    console.error('Error extrayendo laboratorio:', error)
-    return NextResponse.json({ error: 'Error al procesar el documento' }, { status: 500 })
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('Error extrayendo laboratorio:', msg)
+    return NextResponse.json({ error: 'Error al procesar el documento', detail: msg }, { status: 500 })
   }
 }

@@ -33,6 +33,7 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
   const [filter, setFilter] = useState('all')
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [extractedIds, setExtractedIds] = useState<Set<string>>(new Set())
   const [form, setForm] = useState({
     title: '',
     category: 'lab',
@@ -53,10 +54,7 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
       return
     }
     setUploadError('')
-    setForm(p => ({ ...p, file }))
-    if (!form.title) {
-      setForm(p => ({ ...p, file, title: file.name.replace(/\.[^/.]+$/, '') }))
-    }
+    setForm(p => ({ ...p, file, title: p.title || file.name.replace(/\.[^/.]+$/, '') }))
   }
 
   const handleUpload = async () => {
@@ -69,7 +67,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
     setUploadError('')
     const supabase = createClient()
 
-    // Subir archivo a Storage
     const fileExt = form.file.name.split('.').pop()
     const fileName = `${userId}/${Date.now()}.${fileExt}`
 
@@ -83,7 +80,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
       return
     }
 
-    // Guardar en base de datos
     const { error: dbError } = await supabase
       .from('medical_documents')
       .insert({
@@ -101,7 +97,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
       return
     }
 
-    // Resetear form
     setForm({ title: '', category: 'lab', document_date: '', description: '', file: null })
     setShowUpload(false)
     setUploading(false)
@@ -124,6 +119,38 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
     if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
+  const handleExtract = async (doc: Document) => {
+    if (doc.category !== 'lab') return
+
+    console.log('Iniciando extracción para:', doc.id, doc.storage_path)
+
+    try {
+      const res = await fetch('/api/extract-lab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: doc.id,
+          storagePath: doc.storage_path,
+        }),
+      })
+
+      console.log('Status de respuesta:', res.status)
+      const data = await res.json()
+      console.log('Respuesta:', data)
+
+      if (!data.error) {
+        setExtractedIds(prev => new Set(prev).add(doc.id))
+        router.refresh()
+        alert(`✅ Extracción completada: ${data.exam_type}\n${data.summary}`)
+      } else {
+        alert('No se pudo extraer: ' + data.error)
+      }
+    } catch (err) {
+      console.error('Error en fetch:', err)
+      alert('Error de conexión: ' + err)
+    }
+  }
+
   const inputStyle = {
     width: '100%',
     padding: '8px 12px',
@@ -140,26 +167,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
     fontWeight: 500 as const,
     color: '#374151',
     marginBottom: '4px',
-  }
-  const handleExtract = async (doc: Document) => {
-    if (doc.category !== 'lab') return
-
-    const res = await fetch('/api/extract-lab', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        documentId: doc.id,
-        storagePath: doc.storage_path,
-      }),
-    })
-
-    const data = await res.json()
-    if (!data.error) {
-      router.refresh()
-      alert(`✅ Extracción completada: ${data.exam_type}\n${data.summary}`)
-    } else {
-      alert('No se pudo extraer: ' + data.error)
-    }
   }
 
   return (
@@ -263,7 +270,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
               />
             </div>
 
-            {/* Zona de archivo */}
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={labelStyle}>Archivo * (PDF o imagen, máx 10MB)</label>
               <label style={{
@@ -353,6 +359,8 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {filtered.map(doc => {
             const cat = getCat(doc.category)
+            const isExtracted = doc.ai_summary || extractedIds.has(doc.id)
+
             return (
               <div
                 key={doc.id}
@@ -394,11 +402,36 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                     {doc.description && (
                       <span style={{ fontSize: '12px', color: '#9ca3af' }}>· {doc.description}</span>
                     )}
+                    {doc.ai_summary && (
+                      <span style={{ fontSize: '12px', color: '#6b7280', fontStyle: 'italic' }}>
+                        · {doc.ai_summary}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Acciones */}
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                  {doc.category === 'lab' && !isExtracted && (
+                    <button
+                      onClick={() => handleExtract(doc)}
+                      style={{
+                        padding: '6px 12px', borderRadius: '8px',
+                        border: '0.5px solid #bfdbfe', background: '#eff6ff',
+                        fontSize: '13px', cursor: 'pointer', color: '#2563eb',
+                      }}
+                    >
+                      🧪 Extraer
+                    </button>
+                  )}
+                  {doc.category === 'lab' && isExtracted && (
+                    <span style={{
+                      padding: '6px 10px', borderRadius: '8px',
+                      background: '#ecfdf5', fontSize: '12px', color: '#059669',
+                    }}>
+                      ✅ Extraído
+                    </span>
+                  )}
                   <button
                     onClick={() => handleView(doc)}
                     style={{
@@ -419,26 +452,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                   >
                     Eliminar
                   </button>
-                  {doc.category === 'lab' && !doc.ai_summary && (
-                    <button
-                      onClick={() => handleExtract(doc)}
-                      style={{
-                        padding: '6px 12px', borderRadius: '8px',
-                        border: '0.5px solid #bfdbfe', background: '#eff6ff',
-                        fontSize: '13px', cursor: 'pointer', color: '#2563eb',
-                      }}
-                    >
-                      🧪 Extraer
-                    </button>
-                  )}
-                  {doc.ai_summary && (
-                    <span style={{
-                      padding: '6px 10px', borderRadius: '8px',
-                      background: '#ecfdf5', fontSize: '12px', color: '#059669',
-                    }}>
-                      ✅ Extraído
-                    </span>
-                  )}
                 </div>
               </div>
             )
