@@ -2,6 +2,7 @@ import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import Navbar from '@/components/Navbar'
 import PatientView from './PatientView'
+import DoctorAssistant from './DoctorAssistant'
 
 export default async function PatientHistoryPage({
   params
@@ -62,6 +63,7 @@ export default async function PatientHistoryPage({
           doctorId={user.id}
         />
       </main>
+      <DoctorAssistant patientId={patientId} />
     </div>
   )
 }
