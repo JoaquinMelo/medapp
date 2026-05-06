@@ -90,10 +90,10 @@ export default function OnboardingFlow({
               <div style={{
                 width: '36px', height: '36px', borderRadius: '50%',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '16px',
                 background: step >= s.id ? '#2563eb' : '#e5e7eb',
                 color: step >= s.id ? 'white' : '#9ca3af',
-                fontWeight: 600, fontSize: '14px',
+                fontWeight: 600,
+                fontSize: '14px',
               }}>
                 {step > s.id ? '✓' : s.id}
               </div>
