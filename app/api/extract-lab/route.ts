@@ -6,13 +6,29 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
 const PROMPT = `Analiza este examen de laboratorio médico y extrae los valores más relevantes clínicamente (máximo 20).
 
+REGLAS DE NORMALIZACIÓN DE NOMBRES (muy importante):
+- Usa siempre Title Case para los nombres: "Colesterol Total", "Hemoglobina", "Glucosa en Ayunas"
+- Normaliza nombres equivalentes al mismo estándar:
+  * "GLUCOSA", "glucosa", "Glucosa en ayuno", "Glicemia" → "Glucosa"
+  * "COLESTEROL TOTAL", "col. total" → "Colesterol Total"
+  * "TRIGLICÉRIDOS", "trigliceridos" → "Triglicéridos"
+  * "HEMOGLOBINA", "HGB", "Hgb" → "Hemoglobina"
+  * "HEMATOCRITO", "HCT", "Hct" → "Hematocrito"
+  * "LEUCOCITOS", "WBC", "Glóbulos blancos" → "Leucocitos"
+  * "ERITROCITOS", "RBC", "Glóbulos rojos" → "Eritrocitos"
+  * "PLAQUETAS", "PLT" → "Plaquetas"
+  * "CREATININA", "Creat" → "Creatinina"
+  * "SODIO", "Na+" → "Sodio"
+  * "POTASIO", "K+" → "Potasio"
+  * Aplica el mismo criterio para cualquier otro parámetro
+
 Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional ni backticks:
 {
   "summary": "resumen breve del examen en 1-2 oraciones",
   "exam_type": "tipo de examen (ej: Hemograma, Perfil lipídico, etc.)",
   "values": [
     {
-      "name": "nombre del parámetro",
+      "name": "nombre normalizado en Title Case",
       "value": 0,
       "unit": "unidad o null",
       "ref_min": 0,
@@ -141,6 +157,12 @@ export async function POST(request: Request) {
         }))
 
       if (labValues.length > 0) {
+        // Eliminar valores previos de este documento antes de insertar
+        await supabase
+          .from('lab_values')
+          .delete()
+          .eq('document_id', documentId)
+
         await supabase.from('lab_values').insert(labValues)
       }
     }

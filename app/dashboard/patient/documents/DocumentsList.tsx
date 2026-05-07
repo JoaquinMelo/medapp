@@ -80,7 +80,7 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
       return
     }
 
-    const { error: dbError } = await supabase
+    const { data: newDoc, error: dbError } = await supabase
       .from('medical_documents')
       .insert({
         patient_id: userId,
@@ -90,11 +90,30 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
         description: form.description,
         storage_path: fileName,
       })
+      .select()
+      .single()
 
-    if (dbError) {
-      setUploadError('Error guardando el documento: ' + dbError.message)
+    if (dbError || !newDoc) {
+      setUploadError('Error guardando el documento: ' + dbError?.message)
       setUploading(false)
       return
+    }
+
+    // Extraer automáticamente si es laboratorio
+    if (form.category === 'lab') {
+      try {
+        await fetch('/api/extract-lab', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            documentId: newDoc.id,
+            storagePath: fileName,
+          }),
+        })
+        setExtractedIds(prev => new Set(prev).add(newDoc.id))
+      } catch {
+        console.warn('Extracción automática falló, el documento se guardó igual')
+      }
     }
 
     setForm({ title: '', category: 'lab', document_date: '', description: '', file: null })
@@ -121,9 +140,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
 
   const handleExtract = async (doc: Document) => {
     if (doc.category !== 'lab') return
-
-    console.log('Iniciando extracción para:', doc.id, doc.storage_path)
-
     try {
       const res = await fetch('/api/extract-lab', {
         method: 'POST',
@@ -133,20 +149,14 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
           storagePath: doc.storage_path,
         }),
       })
-
-      console.log('Status de respuesta:', res.status)
       const data = await res.json()
-      console.log('Respuesta:', data)
-
       if (!data.error) {
         setExtractedIds(prev => new Set(prev).add(doc.id))
         router.refresh()
-        alert(`✅ Extracción completada: ${data.exam_type}\n${data.summary}`)
       } else {
         alert('No se pudo extraer: ' + data.error)
       }
     } catch (err) {
-      console.error('Error en fetch:', err)
       alert('Error de conexión: ' + err)
     }
   }
@@ -324,7 +334,11 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                 cursor: uploading ? 'not-allowed' : 'pointer',
               }}
             >
-              {uploading ? 'Subiendo...' : 'Guardar documento'}
+              {uploading
+                ? form.category === 'lab'
+                  ? 'Subiendo y extrayendo valores...'
+                  : 'Subiendo...'
+                : 'Guardar documento'}
             </button>
             <button
               onClick={() => setShowUpload(false)}
@@ -370,7 +384,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                   display: 'flex', alignItems: 'center', gap: '14px',
                 }}
               >
-                {/* Icono categoría */}
                 <div style={{
                   width: '40px', height: '40px', borderRadius: '10px',
                   background: cat.bg, display: 'flex',
@@ -380,7 +393,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                   {cat.icon}
                 </div>
 
-                {/* Info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontWeight: 600, fontSize: '14px', color: '#111827', marginBottom: '2px' }}>
                     {doc.title}
@@ -410,7 +422,6 @@ export default function DocumentsList({ documents, userId }: { documents: Docume
                   </div>
                 </div>
 
-                {/* Acciones */}
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                   {doc.category === 'lab' && !isExtracted && (
                     <button
