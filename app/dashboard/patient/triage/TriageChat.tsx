@@ -92,11 +92,18 @@ export default function TriageChat({ history }: { history: HistoryItem[] }) {
       {/* Disclaimer */}
       <div style={{
         background: '#eff6ff', borderRadius: '10px',
-        padding: '10px 14px', fontSize: '13px', color: '#1e40af',
-        display: 'flex', alignItems: 'flex-start', gap: '8px',
+        padding: '12px 16px', fontSize: '13px', color: '#1e40af',
+        border: '0.5px solid #bfdbfe',
       }}>
-        <span style={{ flexShrink: 0 }}>ℹ️</span>
-        <span>Esta IA es una guía de orientación, no reemplaza la consulta médica profesional. En caso de emergencia llama al 131.</span>
+        <p style={{ fontWeight: 600, marginBottom: '4px' }}>
+          ℹ️ Asistente de orientación médica con IA
+        </p>
+        <p style={{ lineHeight: 1.6, color: '#3b5fc0' }}>
+          Este asistente conoce tu historial médico y puede orientarte sobre síntomas, exámenes y valores de laboratorio. 
+          Sus respuestas son <strong>meramente orientativas</strong> — la IA puede cometer errores. 
+          Ante cualquier duda, consulta siempre a un profesional de salud. 
+          En caso de emergencia llama al <strong>131</strong>.
+        </p>
       </div>
 
       {/* Chat */}
